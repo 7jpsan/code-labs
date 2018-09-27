@@ -1,24 +1,16 @@
 // Get a uuid for partition purposes
 // Only try n times before failing.
 
-
 import { v4 as uuid } from 'uuid';
+import { FindUUIDParams, PartitionUUIDResult } from './common';
 
-type FindUUIDParams = {
-  startHex: string,
-  tryAmount: number
-};
-
-type Return = {
-  result: string,
-  tries: number
-};
 
 interface Callback {
-  (err: Error | null, data: Return | null): void;
+  (err: Error | null, data: PartitionUUIDResult | null): void;
 }
 
-function findUUIDSync(params: FindUUIDParams): Return {
+// Classic Synchronous functions Locking thread
+function findUUIDSync(params: FindUUIDParams): PartitionUUIDResult {
 
   let result = uuid();
   let maxTries = 0;
@@ -34,11 +26,12 @@ function findUUIDSync(params: FindUUIDParams): Return {
 }
 
 function sendToServerSync(uuid: string) {
-  console.log('SENT TO SERVER!!!');
+  return;
 }
 
-function findUUIDAsyncCallback(params: FindUUIDParams, callback: Callback) {
 
+// Async using callbacks (AVOID!!!)
+function findUUIDAsyncCallback(params: FindUUIDParams, callback: Callback) {
   setTimeout(() => {
 
     try {
@@ -53,11 +46,17 @@ function findUUIDAsyncCallback(params: FindUUIDParams, callback: Callback) {
   return;
 }
 
+function sendToServerAsyncCallback(uuid: string, callback: Callback) {
+  setTimeout(() => {
+    callback(null, null);
+  }, 3000);
 
-async function findUUIDAsync(params: FindUUIDParams): Promise<Return> {
+  return;
+}
 
-
-  return new Promise((resolve: (r: Return) => void, reject) => {
+// Async with promises.
+async function findUUIDAsync(params: FindUUIDParams): Promise<PartitionUUIDResult> {
+  return new Promise((resolve: (r: PartitionUUIDResult) => void, reject) => {
     setTimeout(() => {
       try {
         const result = findUUIDSync(params);
@@ -65,47 +64,54 @@ async function findUUIDAsync(params: FindUUIDParams): Promise<Return> {
       } catch (error) {
         return reject(error);
       }
-    }, 0);
+    }, 2000);
   });
-
 }
 
+async function sendToServerAsync(uuid: string): Promise<{}> {
 
-function sendToServerAsyncCallback(uuid: string, callback: Callback) {
-  setTimeout(() => {
-
-    console.log('SENT TO SERVER!!!');
-    callback(null, null);
-
-  }, 0);
-
-  return;
-}
-
-async function sendToServerAsync(uuid: string): Promise<Return> {
-
-  return new Promise((resolve: (r: Return) => void, reject) => {
+  return new Promise((resolve: () => void, reject) => {
     setTimeout(() => {
-
-      console.log('SENT TO SERVER!!!');
-      return ({});
-
-    }, 0);
+      resolve();
+    }, 1000);
   });
 }
 
 
-findUUIDAsyncCallback({ startHex: '9', tryAmount: 10000 }, (err: Error | null, data: Return | null) => {
-  console.log('ASYNC: ', err, data);
+// Executions: 
 
+
+// Asynchronous with callbacks (hell).
+findUUIDAsyncCallback({ startHex: '9', tryAmount: 10000 }, (err: Error | null, data: PartitionUUIDResult | null) => {
+  
   sendToServerAsyncCallback(data!.result, () => {
-    console.log('ASYNC: FINISHED!');
+    console.log('ASYNC CALLBACK: FINISHED!', data!);
   });
-
 
 });
 
+// Chaining promises style.
+findUUIDAsync({ startHex: '9', tryAmount: 10000 })
+.then((result: PartitionUUIDResult) => {
+  // Nothing, just for fun
+  return result;
+})
+.then((result: PartitionUUIDResult) => {
+  // Proving that I can join
+  return result;
+})
+.then((result: PartitionUUIDResult) => {
+  return sendToServerAsync(result.result).then(() => {return result});
+})
+.then((result: PartitionUUIDResult) => {
+  console.log('ASYNC/PROMISE FINISHED!!!', result);
+})
+.catch((error: Error) => {
+  console.log('Something went terribly wrong...');
+});
 
+
+// Synchronous executions
 try {
   const result = findUUIDSync({ startHex: '9', tryAmount: 10000 });
   sendToServerSync(result.result);
@@ -115,50 +121,19 @@ try {
 }
 
 
-async function process(){
-    const asyncResult = await findUUIDAsync({ startHex: '9', tryAmount: 10000 });
-    await sendToServerAsync(asyncResult.result);   
-}
-
-
-function* nextUUID(params: FindUUIDParams){
-  let result = uuid();
-  let maxTries = 0;
-
-  while (maxTries < 100) {
-
-    if(result.charAt(0) === params.startHex){
-      const returnValue = yield { result, tries: maxTries };
-      console.log(returnValue);
+// ES6 async/await for the win!! (needs to be inside an async block.)
+async function processAsyncAwait(){
+    try{
+      const asyncResult = await findUUIDAsync({ startHex: '9', tryAmount: 10000 });
+      await sendToServerAsync(asyncResult.result);
+      console.log('ASYNC/AWAIT FINISHED!!!', asyncResult);
+    }catch(err){
+      console.error(err);
     }
-    result = uuid();
-    maxTries++;
-  }
-  return;
 }
+processAsyncAwait();
 
-
-const generator = nextUUID({ startHex: '9', tryAmount: 10000 });
-console.log(generator);
-
-let i = 0;
-for(i = 0; i < 100; i++){
-
-  const f =  generator.next('Okay'+i);
-  if(!f.done){
-    console.log('UUID', f.value); 
-  }else{
-    console.log('UUID', f); 
-    break;
-  }
-
-}
-
-
-
-
-
-
-
-
-
+// Expected: 
+// Even though sync code is called last, it is blocking in nature and will finish last (we can intruduce a fake wait so we guarantee that it finished after the others, no point.)
+// The async calls happen after the timeout and then complete. 
+// It is better to use the last options (with async/await for readability and predictability when possible.)
